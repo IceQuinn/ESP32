@@ -69,6 +69,8 @@ D:/esp/v6.1/esp-idf/components/esp_phy/lib/esp32/libphy.a
 E:/Project/esp/ESP32/ESP/build/esp-idf/esp_netif/libesp_netif.a
 E:/Project/esp/ESP32/ESP/build/esp-idf/wpa_supplicant/libwpa_supplicant.a
 E:/Project/esp/ESP32/ESP/build/esp-idf/esp_coex/libesp_coex.a
+D:/esp/v6.1/esp-idf/components/esp_coex/lib/esp32/libcoexist.a
+D:/esp/v6.1/esp-idf/components/bt/controller/lib_esp32/esp32/libbtdm_app.a
 D:/esp/v6.1/esp-idf/components/esp_wifi/lib/esp32/libcore.a
 D:/esp/v6.1/esp-idf/components/esp_wifi/lib/esp32/libespnow.a
 D:/esp/v6.1/esp-idf/components/esp_wifi/lib/esp32/libmesh.a
@@ -130,6 +132,7 @@ E:/Project/esp/ESP32/ESP/build/esp-idf/esp_coex/libesp_coex.a
 E:/Project/esp/ESP32/ESP/build/esp-idf/esp_wifi/libesp_wifi.a
 E:/Project/esp/ESP32/ESP/build/esp-idf/esp_driver_spi/libesp_driver_spi.a
 E:/Project/esp/ESP32/ESP/build/esp-idf/esp_gdbstub/libesp_gdbstub.a
+E:/Project/esp/ESP32/ESP/build/esp-idf/bt/libbt.a
 E:/Project/esp/ESP32/ESP/build/esp-idf/esp_driver_spi/libesp_driver_spi.a
 E:/Project/esp/ESP32/ESP/build/esp-idf/unity/libunity.a
 E:/Project/esp/ESP32/ESP/build/esp-idf/cmock/libcmock.a
@@ -176,6 +179,7 @@ E:/Project/esp/ESP32/ESP/build/esp-idf/esp_eth/libesp_eth.a
 E:/Project/esp/ESP32/ESP/build/esp-idf/esp_hal_emac/libesp_hal_emac.a
 E:/Project/esp/ESP32/ESP/build/esp-idf/esp_hal_lcd/libesp_hal_lcd.a
 E:/Project/esp/ESP32/ESP/build/esp-idf/esp_hid/libesp_hid.a
+E:/Project/esp/ESP32/ESP/build/esp-idf/bt/libbt.a
 E:/Project/esp/ESP32/ESP/build/esp-idf/tcp_transport/libtcp_transport.a
 E:/Project/esp/ESP32/ESP/build/esp-idf/esp_http_client/libesp_http_client.a
 E:/Project/esp/ESP32/ESP/build/esp-idf/esp_http_server/libesp_http_server.a
