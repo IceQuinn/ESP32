@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+E:/Project/esp/ESP32/ESP/build/CMakeFiles/bootloader
+E:/Project/esp/ESP32/ESP/build/CMakeFiles/bootloader.rule
+E:/Project/esp/ESP32/ESP/build/CMakeFiles/bootloader-complete.rule
+E:/Project/esp/ESP32/ESP/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+E:/Project/esp/ESP32/ESP/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+E:/Project/esp/ESP32/ESP/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+E:/Project/esp/ESP32/ESP/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+E:/Project/esp/ESP32/ESP/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+E:/Project/esp/ESP32/ESP/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+E:/Project/esp/ESP32/ESP/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule
