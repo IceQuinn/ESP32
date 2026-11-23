@@ -1,0 +1,111 @@
+# AI 对话 (ai-app)
+
+一个独立的安卓 AI 对话应用，当前接入 **DeepSeek** 模型，支持流式逐字回复。
+
+与上级目录的 ESP32 灯控工程、`android-app/` 完全独立，自行构建、自行安装。
+
+## 功能
+
+- 接入 DeepSeek API（`deepseek-chat` / `deepseek-reasoner`）
+- 流式输出：回复逐字显示，可随时点“停止”中断
+- **多会话与历史对话**：点左上角「+」开始新对话，之前的会话自动归档；
+  点顶部标题栏可打开历史面板，重新打开或删除历史会话
+- **本地持久化**：会话与历史记录保存在本机，关闭应用后重新打开仍在，
+  并自动打开上次的会话
+- **时间显示**：每条消息气泡下方显示发送时间；跨天自动插入日期分隔；
+  历史列表显示会话的最后活跃时间
+- **白色系界面**：参考 DeepSeek / ChatGPT，纯白背景、浅灰气泡、深色文字
+- 设置页：填写 API Key、切换模型、**测试连接**
+- 错误提示中文化：401 无效密钥、402 余额不足、429 频率限制等
+- 深色模式自动适配
+
+## 安装
+
+APK 位于 `dist/AI-Chat-debug.apk`，也可自行构建后从
+`app/build/outputs/apk/debug/app-debug.apk` 获取。
+
+```powershell
+cd E:\Project\esp\ESP32\ESP\android-app
+. .\android-env.ps1
+cd ..\ai-app
+gradle assembleDebug
+```
+
+或用 USB 调试安装：
+
+```powershell
+adb install -r dist\AI-Chat-debug.apk
+```
+
+小米 / Redmi 手机若提示 `INSTALL_FAILED_USER_RESTRICTED`，需在
+**设置 → 更多设置 → 开发者选项** 中开启 **USB 安装** 与 **USB 调试（安全设置）**。
+
+## 首次使用
+
+1. 打开 App，会自动进入设置页
+2. 到 [platform.deepseek.com](https://platform.deepseek.com) 创建 API Key 并粘贴
+3. 选择模型，点 **测试连接** 确认可用
+4. 点 **保存** 回到聊天页开始对话
+
+## API Key 安全说明
+
+- Key 只保存在本机应用私有目录（`SharedPreferences`），**不会上传到任何服务器**，也不在源码中
+- APK 内不含任何密钥，请勿把 Key 提交到 git
+- 当前使用普通 SharedPreferences，未做加密存储；已 root 的设备理论上可读取
+- 若在共用设备上使用，建议结束后点“清除已保存的 Key”
+
+## 技术说明
+
+| 项 | 说明 |
+|---|---|
+| 语言 / UI | Kotlin + Jetpack Compose (Material 3) |
+| minSdk / targetSdk | 26 / 36 |
+| 网络 | `HttpURLConnection`，手写 SSE 解析，无第三方 HTTP 库 |
+| 依赖 | 仅 AndroidX（core-ktx、activity-compose、lifecycle）+ Compose |
+| 权限 | 仅 `android.permission.INTERNET` |
+
+接口调用的是 DeepSeek 的 OpenAI 兼容接口：
+`POST https://api.deepseek.com/chat/completions`，`Authorization: Bearer <key>`，
+`stream: true` 时按 `data: {...}` 逐行解析，以 `data: [DONE]` 结束。
+
+### 代码结构
+
+```
+app/src/main/java/com/example/aichat/
+├── MainActivity.kt              单 Activity，聊天页/设置页切换
+├── data/
+│   ├── ChatMessage.kt           消息模型（含时间戳）与可选模型列表
+│   ├── Conversation.kt          会话模型（标题、消息、时间）
+│   ├── ConversationStore.kt     会话 JSON 文件持久化
+│   ├── DeepSeekClient.kt        HTTP + SSE 流式客户端
+│   └── SettingsStore.kt         API Key 与模型的本地存储
+├── util/
+│   └── TimeFormat.kt           时间格式化（今天/昨天/日期/分隔标签）
+└── ui/
+    ├── ChatViewModel.kt         会话管理、持久化、聊天状态与流式逻辑
+    ├── ChatScreen.kt            聊天界面（气泡、时间、历史面板、输入栏）
+    ├── SettingsScreen.kt        设置界面
+    └── Theme.kt                 白色系主题配色（含深色模式）
+```
+
+## 已知限制 / 后续计划
+
+- 仅支持 DeepSeek，暂不支持其他厂商
+- 不支持图片输入、函数调用、语音
+- 回复为纯文本显示，未渲染 Markdown
+- 未做 token 统计与费用显示
+- 未实现“新建对话后清空当前页但保留历史”以外的批量管理
+
+## 修复记录
+
+### `nullnull...` 污染正文（Reasoner 模型）
+
+**现象**：使用 `deepseek-reasoner` 时，AI 回复内容出现大量连续的 `null`。
+
+**原因**：思考阶段的 SSE chunk 中 `delta.content` 字段为 JSON `null`。
+`org.json` 的 `optString(key, fallback)` 在“字段存在但值为 null”时返回的是
+**字面量字符串 `"null"`**，而不是 fallback，于是每个 chunk 都被当作正文追加。
+
+**修复**：新增 `safeString()`，显式处理 `JSONObject.NULL`，并在
+`parseDelta`、`ping`、错误信息解析处统一使用。同时 `appendToAssistant`
+忽略空 chunk，避免无效追加。

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      注意：主题必须使用 NoActionBar 变体。
+      若使用 Theme.Material.Light，系统会在状态栏下方额外绘制一条带应用名的
+      ActionBar，与 Compose 自绘的标题重复；因此这里显式禁用 ActionBar 与标题。
+    -->
+    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:colorAccent">#2F6BFF</item>
+        <item name="android:windowBackground">#FFFFFF</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- 浅色背景，状态栏图标需为深色，否则白图标在浅色页面上看不见。 -->
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>
