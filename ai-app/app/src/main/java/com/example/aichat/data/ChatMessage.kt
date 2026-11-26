@@ -14,12 +14,26 @@ data class ChatMessage(
     val role: String,
     val content: String,
     val timestamp: Long = System.currentTimeMillis(),
+    /**
+     * 消息来源。本地指令回执不来自模型，界面上需要单独标识，
+     * 同时也避免用户误以为 AI 真的「控制」了硬件。
+     */
+    val kind: MessageKind = MessageKind.TEXT,
 ) {
     companion object {
         const val ROLE_SYSTEM = "system"
         const val ROLE_USER = "user"
         const val ROLE_ASSISTANT = "assistant"
     }
+}
+
+/** 消息类型。新增类型时必须保留 TEXT 作为默认值，旧会话 JSON 才不会受影响。 */
+enum class MessageKind {
+    /** 普通文本，来自用户或模型。 */
+    TEXT,
+
+    /** 由本地指令执行产生的回执，未经过模型。 */
+    LOCAL_COMMAND,
 }
 
 /**

@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.aichat"
-        minSdk = 26
+        minSdk = 31
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
@@ -29,6 +29,14 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    packaging {
+        // minSdk ≥ 28 时 AGP 默认把 dex 原样存储（安装更快但包更大）。
+        // 这里改回压缩，debug 包从 ~53 MB 降到 ~16 MB，方便传输。
+        dex {
+            useLegacyPackaging = true
+        }
     }
 
     compileOptions {
@@ -56,4 +64,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    testImplementation("junit:junit:4.13.2")
 }

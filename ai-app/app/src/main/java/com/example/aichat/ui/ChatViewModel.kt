@@ -3,10 +3,14 @@ package com.example.aichat.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.aichat.ble.BleRepository
+import com.example.aichat.ble.LedAction
+import com.example.aichat.ble.LedCommandParser
 import com.example.aichat.data.ChatMessage
 import com.example.aichat.data.Conversation
 import com.example.aichat.data.ConversationStore
 import com.example.aichat.data.DeepSeekClient
+import com.example.aichat.data.MessageKind
 import com.example.aichat.data.Models
 import com.example.aichat.data.SettingsStore
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +40,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val settings = SettingsStore(application)
     private val conversationStore = ConversationStore(application)
+
+    /** 与灯控页共用同一个 BLE 连接。 */
+    private val ble = BleRepository.get(application)
 
     data class UiState(
         val current: Conversation = Conversation(),
@@ -129,6 +136,127 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val current = _state.value
         if (!current.canSend) return
         val userText = current.input.trim()
+
+        // 第一层：本地规则。命中就直接执行，完全不经过网络。
+        val localAction = LedCommandParser.parse(userText)
+        if (localAction != null) {
+            runLedCommand(userText, localAction)
+            return
+        }
+
+        // 第二层：提到了灯/ESP32 但说法不明确，交给 AI 判断是否要控灯。
+        if (LedCommandParser.isDeviceRelated(userText) && settings.isConfigured) {
+            runIntentCheck(userText)
+            return
+        }
+
+        startChatReply(userText)
+    }
+
+    /** 执行本地控灯指令，并在会话里留下一条本地回执。 */
+    private fun runLedCommand(userText: String, action: LedAction) {
+        val now = System.currentTimeMillis()
+        val userMessage = ChatMessage(ChatMessage.ROLE_USER, userText, timestamp = now)
+
+        _state.update { st ->
+            val conv = st.current
+            st.copy(
+                current = conv.copy(
+                    // 先放一条空的助手消息占位，执行完成后填入回执，
+                    // 用户能立刻看到「已经收到指令」。
+                    messages = conv.messages + userMessage + ChatMessage(
+                        role = ChatMessage.ROLE_ASSISTANT,
+                        content = "",
+                        timestamp = now,
+                        kind = MessageKind.LOCAL_COMMAND,
+                    ),
+                    updatedAt = now,
+                    title = if (conv.title == "新对话") {
+                        firstUserTitle(conv.messages + userMessage)
+                    } else {
+                        conv.title
+                    },
+                ),
+                input = "",
+                isStreaming = true,
+                error = null,
+                reasoningVisible = "",
+            )
+        }
+
+        viewModelScope.launch {
+            val ok = ble.setLed(action == LedAction.ON)
+            val reply = if (ok) {
+                if (action == LedAction.ON) {
+                    "已为你打开 ESP32 的灯。"
+                } else {
+                    "已为你关闭 ESP32 的灯。"
+                }
+            } else {
+                "没能控制 ESP32 的灯：${ble.failureReason()}"
+            }
+            completeLocalReply(reply)
+            _state.update { it.copy(isStreaming = false) }
+            persist()
+        }
+    }
+
+    /**
+     * 用一次轻量的 Function Calling 判断意图。
+     *
+     * 判断结果不是控灯指令时，照常把这条消息发给 AI，
+     * 所以「ESP32 的灯怎么接」这类问题仍然由模型回答。
+     */
+    private fun runIntentCheck(userText: String) {
+        _state.update { it.copy(isStreaming = true, error = null) }
+        viewModelScope.launch {
+            val action = withContext(Dispatchers.IO) {
+                runCatching {
+                    DeepSeekClient.detectLedAction(
+                        apiKey = settings.apiKey,
+                        modelId = settings.modelId,
+                        text = userText,
+                    )
+                }.getOrNull()
+            }
+            _state.update { it.copy(isStreaming = false) }
+
+            val parsed = when (action) {
+                "on" -> LedAction.ON
+                "off" -> LedAction.OFF
+                else -> null
+            }
+            if (parsed != null) {
+                runLedCommand(userText, parsed)
+            } else {
+                startChatReply(userText)
+            }
+        }
+    }
+
+    /** 用回执内容替换占位的空助手消息。 */
+    private fun completeLocalReply(text: String) {
+        _state.update { st ->
+            val messages = st.current.messages.toMutableList()
+            val index = messages.indexOfLast { it.role == ChatMessage.ROLE_ASSISTANT }
+            if (index >= 0 && messages[index].content.isEmpty()) {
+                messages[index] = messages[index].copy(content = text)
+            } else {
+                messages.add(
+                    ChatMessage(
+                        role = ChatMessage.ROLE_ASSISTANT,
+                        content = text,
+                        kind = MessageKind.LOCAL_COMMAND,
+                    ),
+                )
+            }
+            st.copy(current = st.current.copy(messages = messages))
+        }
+    }
+
+    /** 普通聊天：发送给 DeepSeek 并逐字流式显示。 */
+    private fun startChatReply(userText: String) {
+        val current = _state.value
         val now = System.currentTimeMillis()
 
         val history = current.messages +
@@ -138,9 +266,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             messages = history + ChatMessage(ChatMessage.ROLE_ASSISTANT, "", timestamp = now),
             updatedAt = now,
             title = if (current.current.title == "新对话") {
-                (current.messages + ChatMessage(ChatMessage.ROLE_USER, userText)).let {
-                    firstUserTitle(it)
-                }
+                firstUserTitle(history)
             } else {
                 current.current.title
             },

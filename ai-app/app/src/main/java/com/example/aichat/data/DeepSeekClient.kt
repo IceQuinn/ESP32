@@ -200,6 +200,136 @@ object DeepSeekClient {
         }
     }
 
+    /**
+     * 用 Function Calling 判断一句话是不是控灯指令。
+     *
+     * 只会在「本地规则没命中、但消息确实提到灯/ESP32」时调用，
+     * 所以普通聊天不会多付出一次请求。
+     *
+     * 返回 "on" / "off"；模型没调用工具、不支持工具或请求失败时返回 null，
+     * 由调用方退回普通聊天，保证主流程不受影响。
+     */
+    suspend fun detectLedAction(
+        apiKey: String,
+        modelId: String,
+        text: String,
+    ): String? = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) return@withContext null
+
+        val body = JSONObject().apply {
+            put("model", modelId)
+            put("stream", false)
+            put("temperature", 0)
+            put("max_tokens", 64)
+            put(
+                "messages",
+                JSONArray().apply {
+                    put(
+                        JSONObject().apply {
+                            put("role", "system")
+                            put(
+                                "content",
+                                "你是设备控制意图识别器。只有当用户明确要求打开或关闭 " +
+                                    "ESP32 的灯时才调用 control_led 工具；如果用户是在提问、" +
+                                    "闲聊或讨论原理，不要调用任何工具。",
+                            )
+                        },
+                    )
+                    put(
+                        JSONObject().apply {
+                            put("role", "user")
+                            put("content", text)
+                        },
+                    )
+                },
+            )
+            put(
+                "tools",
+                JSONArray().apply {
+                    put(
+                        JSONObject().apply {
+                            put("type", "function")
+                            put(
+                                "function",
+                                JSONObject().apply {
+                                    put("name", "control_led")
+                                    put("description", "打开或关闭 ESP32 板载 LED")
+                                    put(
+                                        "parameters",
+                                        JSONObject().apply {
+                                            put("type", "object")
+                                            put(
+                                                "properties",
+                                                JSONObject().apply {
+                                                    put(
+                                                        "action",
+                                                        JSONObject().apply {
+                                                            put("type", "string")
+                                                            put(
+                                                                "enum",
+                                                                JSONArray().put("on").put("off"),
+                                                            )
+                                                            put(
+                                                                "description",
+                                                                "on 表示开灯，off 表示关灯",
+                                                            )
+                                                        },
+                                                    )
+                                                },
+                                            )
+                                            put("required", JSONArray().put("action"))
+                                        },
+                                    )
+                                },
+                            )
+                        },
+                    )
+                },
+            )
+        }.toString()
+
+        val connection = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = READ_TIMEOUT_MS
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Authorization", "Bearer $apiKey")
+        }
+
+        try {
+            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            if (connection.responseCode !in 200..299) return@withContext null
+
+            val raw = connection.inputStream
+                .bufferedReader(Charsets.UTF_8)
+                .use { it.readText() }
+            val message = JSONObject(raw)
+                .optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?: return@withContext null
+
+            val arguments = message.optJSONArray("tool_calls")
+                ?.optJSONObject(0)
+                ?.optJSONObject("function")
+                ?.let { safeString(it, "arguments") }
+                .orEmpty()
+            if (arguments.isBlank()) return@withContext null
+
+            when (JSONObject(arguments).optString("action")) {
+                "on" -> "on"
+                "off" -> "off"
+                else -> null
+            }
+        } catch (e: Exception) {
+            // 工具调用失败不应打断聊天，直接交给普通请求兜底。
+            null
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun buildRequestBody(
         modelId: String,
         messages: List<ChatMessage>,

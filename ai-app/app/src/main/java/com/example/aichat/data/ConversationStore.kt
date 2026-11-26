@@ -67,6 +67,8 @@ class ConversationStore(context: Context) {
                     put("role", m.role)
                     put("content", m.content)
                     put("timestamp", m.timestamp)
+                    // 新增字段对旧文件是可选的，读取时缺省为 TEXT。
+                    put("kind", m.kind.name)
                 }
             )
         }
@@ -85,6 +87,11 @@ class ConversationStore(context: Context) {
                             role = m.optString("role", ChatMessage.ROLE_USER),
                             content = m.optString("content", ""),
                             timestamp = m.optLong("timestamp", now),
+                            kind = runCatching {
+                                MessageKind.valueOf(
+                                    m.optString("kind", MessageKind.TEXT.name),
+                                )
+                            }.getOrDefault(MessageKind.TEXT),
                         )
                     )
                 }

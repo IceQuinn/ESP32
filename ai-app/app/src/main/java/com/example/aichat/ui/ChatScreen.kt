@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.aichat.data.ChatMessage
 import com.example.aichat.data.Conversation
+import com.example.aichat.data.MessageKind
 import com.example.aichat.data.Models
 import com.example.aichat.util.TimeFormat
 
@@ -75,6 +76,7 @@ import com.example.aichat.util.TimeFormat
 fun ChatScreen(
     viewModel: ChatViewModel,
     onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsState()
     val listState = rememberLazyListState()
@@ -88,6 +90,7 @@ fun ChatScreen(
     }
 
     Scaffold(
+        modifier = modifier,
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
@@ -342,19 +345,34 @@ private fun MessageBubble(message: ChatMessage, isStreamingPlaceholder: Boolean)
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            "正在思考",
+                            text = if (message.kind == MessageKind.LOCAL_COMMAND) {
+                                "正在执行指令…"
+                            } else {
+                                "正在思考"
+                            },
                             fontSize = 15.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 } else {
-                    SelectionContainer {
-                        Text(
-                            text = message.content,
-                            fontSize = 15.sp,
-                            lineHeight = 24.sp,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
+                    Column {
+                        SelectionContainer {
+                            Text(
+                                text = message.content,
+                                fontSize = 15.sp,
+                                lineHeight = 24.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                        // 本地回执不是模型生成的，明确标出来避免误解。
+                        if (message.kind == MessageKind.LOCAL_COMMAND) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = "⚡ 本地指令 · 未经过模型",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
@@ -387,7 +405,6 @@ private fun InputBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .navigationBarsPadding()
                     .imePadding()
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.Bottom,

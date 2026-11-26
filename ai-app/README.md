@@ -2,7 +2,8 @@
 
 一个独立的安卓 AI 对话应用，当前接入 **DeepSeek** 模型，支持流式逐字回复。
 
-与上级目录的 ESP32 灯控工程、`android-app/` 完全独立，自行构建、自行安装。
+与上级目录的 ESP32 灯控工程、`android-app/` 仍是两个独立应用，各自构建、各自安装。
+本应用在聊天功能之上集成了 ESP32 的 BLE 控灯能力。
 
 ## 功能
 
@@ -18,6 +19,9 @@
 - 设置页：填写 API Key、切换模型、**测试连接**
 - 错误提示中文化：401 无效密钥、402 余额不足、429 频率限制等
 - 深色模式自动适配
+- **ESP32 控灯**：底部「灯控」Tab 可手动扫描/连接/开关灯；
+  聊天里说「打开 esp32 的灯」「关闭 esp32 的灯」会直接调用 BLE 指令，
+  不消耗 API 额度，回执标注为「本地指令 · 未经过模型」
 
 ## 安装
 
@@ -54,12 +58,39 @@ adb install -r dist\AI-Chat-debug.apk
 - 当前使用普通 SharedPreferences，未做加密存储；已 root 的设备理论上可读取
 - 若在共用设备上使用，建议结束后点“清除已保存的 Key”
 
+## ESP32 控灯
+
+### 指令识别顺序
+
+1. **本地关键词**：命中「打开/关闭/点亮/熄灭 + 灯」等明确说法时直接执行 BLE 写入，
+   不请求 DeepSeek，也不消耗 token；
+2. **AI 兜底**：消息里提到灯/ESP32 但说法不明确（如「把那个灯弄亮」）时，
+   先用一次 Function Calling 判断意图，判不出来再按普通聊天处理；
+3. 疑问句、否定句（「灯怎么打开？」「不要开灯」）一律不执行，交给 AI 回答。
+
+### BLE 协议
+
+与固件 `main/bluetooth.c` 保持一致：
+
+- 设备名 `ESP32_BLE`
+- 服务 `12345678-1234-5678-1234-56789abcdef0`
+- 特征 `12345678-1234-5678-1234-56789abcdef1`，支持读与带响应写
+- 写 `0x01` 开灯、`0x00` 关灯；读一字节返回当前状态
+
+聊天与灯控页共用同一个 GATT 连接（`BleRepository` 单例），
+所以在灯控页连上之后，聊天里的指令无需重新扫描。
+
+### 权限
+
+Android 12+ 只需要「附近设备」权限（`BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT`），
+扫描声明了 `neverForLocation`，不额外申请定位权限；`minSdk` 因此提升到 31。
+
 ## 技术说明
 
 | 项 | 说明 |
 |---|---|
 | 语言 / UI | Kotlin + Jetpack Compose (Material 3) |
-| minSdk / targetSdk | 26 / 36 |
+| minSdk / targetSdk | 31 / 36 |
 | 网络 | `HttpURLConnection`，手写 SSE 解析，无第三方 HTTP 库 |
 | 依赖 | 仅 AndroidX（core-ktx、activity-compose、lifecycle）+ Compose |
 | 权限 | 仅 `android.permission.INTERNET` |

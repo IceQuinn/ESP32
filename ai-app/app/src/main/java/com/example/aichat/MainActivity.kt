@@ -7,20 +7,38 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import com.example.aichat.ble.BleRepository
 import com.example.aichat.data.SettingsStore
 import com.example.aichat.ui.AiChatTheme
 import com.example.aichat.ui.ChatScreen
 import com.example.aichat.ui.ChatViewModel
+import com.example.aichat.ui.LedScreen
 import com.example.aichat.ui.SettingsScreen
 
 /**
- * 单 Activity + Compose：聊天页与设置页之间用状态切换，避免引入 Navigation 依赖。
+ * 单 Activity + Compose。
+ *
+ * 主界面是「聊天 / 灯控」两个底部 Tab，设置页仍用状态切换覆盖在上层，
+ * 这样不引入 Navigation 依赖也能保持返回栈语义。
  */
 class MainActivity : ComponentActivity() {
 
@@ -52,6 +70,14 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onDestroy() {
+        // 真正退出时释放 GATT，避免设备端一直占着一个连接槽。
+        if (isFinishing) {
+            BleRepository.get(this).close()
+        }
+        super.onDestroy()
+    }
 }
 
 @Composable
@@ -60,6 +86,9 @@ private fun AppRoot(
     startOnSettings: Boolean,
 ) {
     var showSettings by remember { mutableStateOf(startOnSettings) }
+    var tab by rememberSaveable { mutableStateOf(0) }
+    val context = LocalContext.current
+    val ble = remember { BleRepository.get(context) }
 
     if (showSettings) {
         BackHandler { showSettings = false }
@@ -73,10 +102,51 @@ private fun AppRoot(
                 showSettings = false
             },
         )
-    } else {
-        ChatScreen(
-            viewModel = chatViewModel,
-            onOpenSettings = { showSettings = true },
-        )
+        return
+    }
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        // 状态栏留白由各页面自己处理，这里只负责底部导航栏的高度。
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        bottomBar = {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                NavigationBarItem(
+                    selected = tab == 0,
+                    onClick = { tab = 0 },
+                    icon = {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Chat,
+                            contentDescription = "聊天",
+                        )
+                    },
+                    label = { Text("聊天") },
+                )
+                NavigationBarItem(
+                    selected = tab == 1,
+                    onClick = { tab = 1 },
+                    icon = {
+                        Icon(
+                            Icons.Filled.Lightbulb,
+                            contentDescription = "灯控",
+                        )
+                    },
+                    label = { Text("灯控") },
+                )
+            }
+        },
+    ) { padding ->
+        when (tab) {
+            0 -> ChatScreen(
+                viewModel = chatViewModel,
+                onOpenSettings = { showSettings = true },
+                modifier = Modifier.padding(padding),
+            )
+
+            else -> LedScreen(
+                ble = ble,
+                modifier = Modifier.padding(padding),
+            )
+        }
     }
 }
