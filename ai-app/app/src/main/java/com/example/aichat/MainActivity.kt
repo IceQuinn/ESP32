@@ -9,15 +9,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.filled.Lightbulb
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,8 +31,8 @@ import com.example.aichat.ui.SettingsScreen
 /**
  * 单 Activity + Compose。
  *
- * 主界面是「聊天 / 灯控」两个底部 Tab，设置页仍用状态切换覆盖在上层，
- * 这样不引入 Navigation 依赖也能保持返回栈语义。
+ * 主界面是「聊天 / IOT / 我」三个底部 Tab（仿微信样式，见 [WeChatBottomBar]）；
+ * 设置页用状态切换覆盖在上层，这样不引入 Navigation 依赖也能保持返回栈语义。
  */
 class MainActivity : ComponentActivity() {
 
@@ -110,30 +104,10 @@ private fun AppRoot(
         // 状态栏留白由各页面自己处理，这里只负责底部导航栏的高度。
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                NavigationBarItem(
-                    selected = tab == 0,
-                    onClick = { tab = 0 },
-                    icon = {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Chat,
-                            contentDescription = "聊天",
-                        )
-                    },
-                    label = { Text("聊天") },
-                )
-                NavigationBarItem(
-                    selected = tab == 1,
-                    onClick = { tab = 1 },
-                    icon = {
-                        Icon(
-                            Icons.Filled.Lightbulb,
-                            contentDescription = "灯控",
-                        )
-                    },
-                    label = { Text("灯控") },
-                )
-            }
+            WeChatBottomBar(
+                selectedIndex = tab,
+                onSelect = { tab = it },
+            )
         },
     ) { padding ->
         when (tab) {
@@ -143,9 +117,16 @@ private fun AppRoot(
                 modifier = Modifier.padding(padding),
             )
 
-            else -> LedScreen(
+            1 -> LedScreen(
                 ble = ble,
                 modifier = Modifier.padding(padding),
+            )
+
+            else -> ProfileScreen(
+                onOpenSettings = { showSettings = true },
+                modifier = Modifier
+                    .padding(padding)
+                    .statusBarsPadding(),
             )
         }
     }

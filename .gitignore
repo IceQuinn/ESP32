@@ -55,3 +55,6 @@ dkms.conf
 *.dwo
 
 build/
+.dsh-gradle/
+.kotlin/
+.shots/

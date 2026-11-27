@@ -21,13 +21,16 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,6 +38,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -46,9 +50,15 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -57,6 +67,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.aichat.WeChatGreen
 import com.example.aichat.data.ChatMessage
 import com.example.aichat.data.Conversation
 import com.example.aichat.data.MessageKind
@@ -82,6 +93,32 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val sheetState = rememberModalBottomSheetState()
 
+    // 语音输入的麦克风权限：首次点击时申请，拒绝后只提示不阻塞输入。
+    val context = LocalContext.current
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) viewModel.toggleVoiceInput()
+    }
+    val onMicClick: () -> Unit = remember {
+        {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.RECORD_AUDIO,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (granted) {
+                viewModel.toggleVoiceInput()
+            } else {
+                micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            }
+        }
+    }
+
+    // 页面离开（切到灯控页、进设置）时释放识别服务。
+    DisposableEffect(Unit) {
+        onDispose { viewModel.releaseVoiceInput() }
+    }
+
     // 新消息或流式内容增长时自动滚动到底部。
     LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.content?.length) {
         if (state.messages.isNotEmpty()) {
@@ -106,6 +143,7 @@ fun ChatScreen(
                         Text(
                             text = Models.find(state.modelId).label,
                             fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -136,13 +174,18 @@ fun ChatScreen(
         },
         bottomBar = {
             InputBar(
-                text = state.input,
-                enabled = !state.isStreaming,
+                text = state.displayInput,
+                enabled = !state.isStreaming && !state.isListening,
                 canSend = state.canSend,
                 onTextChange = viewModel::onInputChange,
                 onSend = viewModel::send,
                 onStop = viewModel::stop,
                 isStreaming = state.isStreaming,
+                isListening = state.isListening,
+                canStartVoice = state.canStartVoice,
+                voiceHint = state.voiceHint,
+                onMicClick = onMicClick,
+                onDismissVoiceHint = viewModel::dismissVoiceHint,
             )
         },
     ) { padding ->
@@ -172,12 +215,12 @@ fun ChatScreen(
                         .weight(1f)
                         .fillMaxWidth(),
                     contentPadding = PaddingValues(
-                        start = 16.dp,
-                        end = 16.dp,
-                        top = 8.dp,
-                        bottom = 8.dp,
+                        start = 12.dp,
+                        end = 12.dp,
+                        top = 6.dp,
+                        bottom = 6.dp,
                     ),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(state.messages) { message ->
                         val index = state.messages.indexOf(message)
@@ -189,7 +232,7 @@ fun ChatScreen(
                         Column {
                             if (showDivider) {
                                 DayDivider(TimeFormat.dayDivider(message.timestamp))
-                                Spacer(Modifier.height(6.dp))
+                                Spacer(Modifier.height(2.dp))
                             }
                             MessageBubble(
                                 message = message,
@@ -227,16 +270,13 @@ private fun DayDivider(label: String) {
         modifier = Modifier.fillMaxWidth(),
         contentAlignment = Alignment.Center,
     ) {
+        // 微信的时间分隔是纯灰字居中，不加胶囊底色，视觉上更轻。
         Text(
             text = label,
             fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier
-                .background(
-                    MaterialTheme.colorScheme.surfaceVariant,
-                    RoundedCornerShape(10.dp),
-                )
-                .padding(horizontal = 10.dp, vertical = 3.dp),
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            modifier = Modifier.padding(vertical = 2.dp),
         )
     }
 }
@@ -321,21 +361,18 @@ private fun MessageBubble(message: ChatMessage, isStreamingPlaceholder: Boolean)
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
     ) {
         Surface(
-            shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (isUser) 16.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 16.dp,
-            ),
-            // 双方都用浅色底块：用户浅灰、AI 更浅，层次靠明度而非强烈对比。
-            color = if (isUser) {
-                MaterialTheme.colorScheme.surfaceVariant
+            shape = if (isUser) {
+                RoundedCornerShape(6.dp)
             } else {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                // AI 气泡左上角留尖角，模拟微信消息尾巴的指向感。
+                RoundedCornerShape(topStart = 2.dp, topEnd = 6.dp, bottomEnd = 6.dp, bottomStart = 6.dp)
             },
-            modifier = Modifier.widthIn(max = 340.dp),
+            // 微信配色：自己绿色、对方白色，靠颜色 + 对齐方向区分，不加姓名标签。
+            color = if (isUser) WeChatGreen else Color(0xFFFFFFFF),
+            shadowElevation = if (isUser) 0.dp else 1.dp,
+            modifier = Modifier.widthIn(max = 320.dp),
         ) {
-            Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Box(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
                 if (isStreamingPlaceholder) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(
@@ -360,29 +397,39 @@ private fun MessageBubble(message: ChatMessage, isStreamingPlaceholder: Boolean)
                             Text(
                                 text = message.content,
                                 fontSize = 15.sp,
-                                lineHeight = 24.sp,
-                                color = MaterialTheme.colorScheme.onSurface,
+                                lineHeight = 21.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (isUser) {
+                                    Color.White
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
                             )
                         }
                         // 本地回执不是模型生成的，明确标出来避免误解。
                         if (message.kind == MessageKind.LOCAL_COMMAND) {
-                            Spacer(Modifier.height(6.dp))
+                            Spacer(Modifier.height(4.dp))
                             Text(
-                                text = "⚡ 本地指令 · 未经过模型",
+                                text = "⚡ 本地指令",
                                 fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Medium,
+                                color = if (isUser) {
+                                    Color.White.copy(alpha = 0.85f)
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                             )
                         }
                     }
                 }
             }
         }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(3.dp))
         Text(
             text = TimeFormat.messageTime(message.timestamp),
             fontSize = 10.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-            modifier = Modifier.padding(horizontal = 4.dp),
+            modifier = Modifier.padding(horizontal = 2.dp),
         )
     }
 }
@@ -393,74 +440,174 @@ private fun InputBar(
     enabled: Boolean,
     canSend: Boolean,
     isStreaming: Boolean,
+    isListening: Boolean,
+    canStartVoice: Boolean,
+    voiceHint: String?,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
+    onMicClick: () -> Unit,
+    onDismissVoiceHint: () -> Unit,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
     ) {
         Column {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            if (isListening || voiceHint != null) {
+                VoiceStatusBar(
+                    isListening = isListening,
+                    hint = voiceHint,
+                    onDismissHint = onDismissVoiceHint,
+                )
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .imePadding()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.Bottom,
+                    .padding(horizontal = 6.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = onTextChange,
-                    modifier = Modifier.weight(1f),
-                    placeholder = {
-                        Text("给 AI 发送消息…", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    },
-                    maxLines = 5,
-                    enabled = enabled,
-                    shape = RoundedCornerShape(22.dp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
-                )
-                Spacer(Modifier.width(8.dp))
-                if (isStreaming) {
-                    IconButton(
-                        onClick = onStop,
-                        modifier = Modifier
-                            .size(46.dp)
-                            .background(
-                                MaterialTheme.colorScheme.onSurface,
-                                RoundedCornerShape(23.dp),
-                            ),
+                // 输入框用 Surface + BasicTextField 自绘，不用 OutlinedTextField：
+                // Material 的 OutlinedTextField 默认内边距让最小高度下不去，做不出微信那种 36dp 的矮框。
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFFF7F7F7),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 36.dp),
+                ) {
+                    Box(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                        contentAlignment = Alignment.CenterStart,
                     ) {
-                        Icon(
-                            Icons.Filled.Stop,
-                            contentDescription = "停止",
-                            tint = MaterialTheme.colorScheme.surface,
-                        )
-                    }
-                } else {
-                    IconButton(
-                        onClick = onSend,
-                        enabled = canSend,
-                        modifier = Modifier
-                            .size(46.dp)
-                            .background(
-                                if (canSend) MaterialTheme.colorScheme.onSurface
-                                else MaterialTheme.colorScheme.outlineVariant,
-                                RoundedCornerShape(23.dp),
+                        if (text.isEmpty()) {
+                            Text(
+                                if (isListening) "正在听，请说话…" else "给 AI 发送消息…",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
+                        BasicTextField(
+                            value = text,
+                            onValueChange = onTextChange,
+                            enabled = enabled,
+                            textStyle = LocalTextStyle.current.copy(
+                                fontSize = 14.sp,
+                                lineHeight = 18.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface,
                             ),
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "发送",
-                            tint = if (canSend) {
-                                MaterialTheme.colorScheme.surface
-                            } else {
-                                Color(0xFF9AA0A6)
-                            },
+                            maxLines = 4,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
                         )
                     }
                 }
+                Spacer(Modifier.width(6.dp))
+                if (!isStreaming) {
+                    // 用 Surface 画按钮：IconButton 默认的圆形水波纹会盖掉圆角方形背景，
+                    // 直接 background() 会出现「圆形按下态 + 方形底色」割裂的效果。
+                    Surface(
+                        onClick = onMicClick,
+                        enabled = canStartVoice || isListening,
+                        shape = CircleShape,
+                        color = if (isListening) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            Color(0xFFF2F2F2)
+                        },
+                        contentColor = if (isListening) {
+                            MaterialTheme.colorScheme.onError
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.Mic,
+                                contentDescription = if (isListening) "结束语音输入" else "语音输入",
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(6.dp))
+                }
+                if (isStreaming) {
+                    Surface(
+                        onClick = onStop,
+                        shape = CircleShape,
+                        color = WeChatGreen,
+                        contentColor = Color.White,
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.Stop,
+                                contentDescription = "停止",
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                } else {
+                    Surface(
+                        onClick = onSend,
+                        enabled = canSend,
+                        shape = CircleShape,
+                        color = if (canSend) WeChatGreen else Color(0xFFE6E6E6),
+                        contentColor = if (canSend) Color.White else Color(0xFFB0B0B0),
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "发送",
+                                modifier = Modifier.size(17.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 语音输入的状态条：识别中显示「正在听」，识别失败/无结果时显示一次性提示。
+ * 识别中没有录音波形（系统识别服务不提供稳定的音量回调跨机型），
+ * 因此只用文字提示，避免动画在不同机型上表现不一致。
+ */
+@Composable
+private fun VoiceStatusBar(
+    isListening: Boolean,
+    hint: String?,
+    onDismissHint: () -> Unit,
+) {
+    Surface(
+        color = if (isListening) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (isListening) "🎙 正在识别，识别完成会自动发送" else (hint ?: ""),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (!isListening) {
+                TextButton(onClick = onDismissHint) { Text("知道了", fontSize = 11.sp) }
             }
         }
     }

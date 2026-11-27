@@ -13,6 +13,7 @@ import com.example.aichat.data.DeepSeekClient
 import com.example.aichat.data.MessageKind
 import com.example.aichat.data.Models
 import com.example.aichat.data.SettingsStore
+import com.example.aichat.voice.VoiceInputEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +45,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /** 与灯控页共用同一个 BLE 连接。 */
     private val ble = BleRepository.get(application)
 
+    /** 语音输入引擎，只在用户点麦克风时启用。 */
+    private val voice = VoiceInputEngine(application)
+
+    /** 识别过程中，输入框以临时字幕为准；识别结束时整体替换为识别结果并自动发送。 */
+    private var inputBeforeListening: String = ""
+
     data class UiState(
         val current: Conversation = Conversation(),
         val history: List<Conversation> = emptyList(),
@@ -55,12 +62,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val modelId: String = Models.DEFAULT_MODEL_ID,
         val historyOpen: Boolean = false,
         val restored: Boolean = false,
+        /** 正在收音（麦克风按钮高亮）。 */
+        val isListening: Boolean = false,
+        /** 识别中的临时字幕，非空时覆盖输入框显示。 */
+        val voicePartial: String = "",
+        /** 识别状态的提示文案（如「没有听清」），不当作错误处理。 */
+        val voiceHint: String? = null,
     ) {
         val messages: List<ChatMessage>
             get() = current.messages
 
         val canSend: Boolean
             get() = input.isNotBlank() && !isStreaming && apiKeyConfigured
+
+        /** 输入框实际显示的文字：识别中优先显示临时字幕。 */
+        val displayInput: String
+            get() = if (isListening && voicePartial.isNotEmpty()) voicePartial else input
+
+        /** 是否可以开始语音输入：系统在流式回复或识别中都不应抢麦克风。 */
+        val canStartVoice: Boolean
+            get() = !isStreaming && !isListening
     }
 
     private val _state = MutableStateFlow(
@@ -111,7 +132,77 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onInputChange(text: String) {
-        _state.update { it.copy(input = text) }
+        // 用户手动改字说明不再想用识别结果，顺带收起提示。
+        _state.update { it.copy(input = text, voiceHint = null) }
+    }
+
+    /** 语音按钮的点击入口：识别中则结束收音，否则开始一次识别。 */
+    fun toggleVoiceInput() {
+        if (_state.value.isListening) {
+            voice.stop()
+        } else {
+            startVoiceInput()
+        }
+    }
+
+    /** 开始一次语音识别。权限由界面层在调用前确保已授予。 */
+    private fun startVoiceInput() {
+        val snapshot = _state.value
+        if (snapshot.isStreaming) {
+            _state.update { it.copy(voiceHint = "AI 正在回复，请稍后再用语音输入。") }
+            return
+        }
+        inputBeforeListening = snapshot.input
+        _state.update {
+            it.copy(isListening = true, voicePartial = "", voiceHint = null)
+        }
+        voice.start(object : VoiceInputEngine.Callback {
+            override fun onReady() = Unit
+
+            override fun onVolumeChanged(rmsDb: Float) = Unit
+
+            override fun onPartial(text: String) {
+                _state.update { if (it.isListening) it.copy(voicePartial = text) else it }
+            }
+
+            override fun onResult(text: String, error: String?) {
+                val finalText = text.trim()
+                _state.update { st ->
+                    st.copy(
+                        input = finalText,
+                        voicePartial = "",
+                        voiceHint = error,
+                    )
+                }
+                // 识别成功就直接发出；没听清时只提示，不动输入框里的原文。
+                if (finalText.isNotEmpty()) {
+                    sendVoiceResult(finalText)
+                } else {
+                    _state.update { it.copy(input = inputBeforeListening) }
+                }
+            }
+
+            override fun onFinished() {
+                _state.update { it.copy(isListening = false, voicePartial = "") }
+            }
+        })
+    }
+
+    /** 语音识别结束后自动把文字发出去（用户已确认：识别结果直接发送）。 */
+    private fun sendVoiceResult(text: String) {
+        if (text.isEmpty()) return
+        _state.update { it.copy(input = text, voiceHint = null) }
+        send()
+    }
+
+    /** 退出页面或切换会话时，确保系统识别服务被释放。 */
+    fun releaseVoiceInput() {
+        voice.release()
+        _state.update { it.copy(isListening = false, voicePartial = "") }
+    }
+
+    fun dismissVoiceHint() {
+        _state.update { it.copy(voiceHint = null) }
     }
 
     fun dismissError() {
@@ -326,6 +417,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         streamJob = null
         _state.update { it.copy(isStreaming = false) }
         persist()
+    }
+
+    override fun onCleared() {
+        // ViewModel 销毁时释放系统语音识别服务，避免占用麦克风。
+        voice.release()
+        super.onCleared()
     }
 
     /**
